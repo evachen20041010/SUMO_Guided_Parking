@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<additional xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/additional_file.xsd">
+
+  <!-- General parking on both aisles -->
+  <parkingArea id="PA_G_W1" lane="aisle_west_east_0" startPos="10.0" endPos="70.0" roadsideCapacity="20"/>
+  <parkingArea id="PA_G_E1" lane="aisle_east_west_0" startPos="10.0" endPos="70.0" roadsideCapacity="20"/>
+
+  <!-- Family (special) -->
+  <parkingArea id="PA_F_W" lane="aisle_west_east_0" startPos="80.0" endPos="110.0" roadsideCapacity="8"/>
+
+  <!-- Disabled (special) -->
+  <parkingArea id="PA_D_E" lane="aisle_east_west_0" startPos="80.0" endPos="110.0" roadsideCapacity="6"/>
+
+</additional>

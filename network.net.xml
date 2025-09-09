@@ -1,0 +1,49 @@
+<?xml version='1.0' encoding='utf-8'?>
+<net xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="1.16" junctionCornerDetail="5" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
+  <location netOffset="0.00,0.00" convBoundary="0.00,0.00,200.00,120.00" origBoundary="0.00,0.00,200.00,120.00" projParameter="!" />
+  <edge id="west_east" from="W" to="E" priority="1" length="200.0">
+    <lane index="0" speed="8.33" length="200.0" width="3.5" allow="passenger" id="west_east_0" shape="0.0,60.0 200.0,60.0" />
+  </edge>
+  <edge id="east_west" from="E" to="W" priority="1" length="200.0">
+    <lane index="0" speed="8.33" length="200.0" width="3.5" allow="passenger" id="east_west_0" shape="200.0,60.0 0.0,60.0" />
+  </edge>
+  <edge id="south_north" from="S" to="N" priority="1" length="120.0">
+    <lane index="0" speed="8.33" length="120.0" width="3.5" allow="passenger" id="south_north_0" shape="100.0,0.0 100.0,120.0" />
+  </edge>
+  <edge id="north_south" from="N" to="S" priority="1" length="120.0">
+    <lane index="0" speed="8.33" length="120.0" width="3.5" allow="passenger" id="north_south_0" shape="100.0,120.0 100.0,0.0" />
+  </edge>
+
+  
+  <edge id="aisle_west_east" from="A1W" to="A1E" priority="1" length="180.0">
+    <lane index="0" speed="5.56" length="180.0" width="3.2" allow="passenger" id="aisle_west_east_0" shape="10.0,40.0 190.0,40.0" />
+  </edge>
+  <edge id="aisle_east_west" from="A2E" to="A2W" priority="1" length="180.0">
+    <lane index="0" speed="5.56" length="180.0" width="3.2" allow="passenger" id="aisle_east_west_0" shape="190.0,80.0 10.0,80.0" />
+  </edge>
+
+  <junction id="W" type="priority" x="0.0" y="60.0" />
+  <junction id="E" type="priority" x="200.0" y="60.0" />
+  <junction id="S" type="priority" x="100.0" y="0.0" />
+  <junction id="N" type="priority" x="100.0" y="120.0" />
+
+  <junction id="A1W" type="priority" x="10.0" y="40.0" />
+  <junction id="A1E" type="priority" x="190.0" y="40.0" />
+  <junction id="A2W" type="priority" x="10.0" y="80.0" />
+  <junction id="A2E" type="priority" x="190.0" y="80.0" />
+
+  
+  <edge id="WS" from="W" to="S"><lane index="0" speed="8.33" length="67.1" allow="passenger" id="WS_0" shape="0.0,60.0 100.0,0.0" /></edge>
+  <edge id="SN" from="S" to="N"><lane index="0" speed="8.33" length="120.0" allow="passenger" id="SN_0" shape="100.0,0.0 100.0,120.0" /></edge>
+  <edge id="NE" from="N" to="E"><lane index="0" speed="8.33" length="91.7" allow="passenger" id="NE_0" shape="100.0,120.0 200.0,60.0" /></edge>
+  <edge id="EW" from="E" to="W"><lane index="0" speed="8.33" length="200.0" allow="passenger" id="EW_0" shape="200.0,60.0 0.0,60.0" /></edge>
+  <edge id="NW" from="N" to="W"><lane index="0" speed="8.33" length="91.7" allow="passenger" id="NW_0" shape="100.0,120.0 0.0,60.0" /></edge>
+  <edge id="SE" from="S" to="E"><lane index="0" speed="8.33" length="91.7" allow="passenger" id="SE_0" shape="100.0,0.0 200.0,60.0" /></edge>
+
+  
+  <edge id="W_A1W" from="W" to="A1W"><lane index="0" speed="5.56" length="30.0" allow="passenger" id="W_A1W_0" shape="0.0,60.0 10.0,40.0" /></edge>
+  <edge id="A1E_E" from="A1E" to="E"><lane index="0" speed="5.56" length="30.0" allow="passenger" id="A1E_E_0" shape="190.0,40.0 200.0,60.0" /></edge>
+  <edge id="W_A2W" from="W" to="A2W"><lane index="0" speed="5.56" length="30.0" allow="passenger" id="W_A2W_0" shape="0.0,60.0 10.0,80.0" /></edge>
+  <edge id="A2E_E" from="A2E" to="E"><lane index="0" speed="5.56" length="30.0" allow="passenger" id="A2E_E_0" shape="190.0,80.0 200.0,60.0" /></edge>
+
+  <connection from="west_east" to="east_west" fromLane="0" toLane="0" state="M" dir="t" /><connection from="west_east" to="EW" fromLane="0" toLane="0" state="M" dir="t" /><connection from="east_west" to="west_east" fromLane="0" toLane="0" state="M" dir="t" /><connection from="east_west" to="WS" fromLane="0" toLane="0" state="M" dir="l" /><connection from="east_west" to="W_A1W" fromLane="0" toLane="0" state="M" dir="l" /><connection from="east_west" to="W_A2W" fromLane="0" toLane="0" state="M" dir="r" /><connection from="south_north" to="north_south" fromLane="0" toLane="0" state="M" dir="t" /><connection from="south_north" to="NE" fromLane="0" toLane="0" state="M" dir="r" /><connection from="south_north" to="NW" fromLane="0" toLane="0" state="M" dir="l" /><connection from="north_south" to="south_north" fromLane="0" toLane="0" state="M" dir="t" /><connection from="north_south" to="SN" fromLane="0" toLane="0" state="M" dir="t" /><connection from="north_south" to="SE" fromLane="0" toLane="0" state="M" dir="l" /><connection from="aisle_west_east" to="A1E_E" fromLane="0" toLane="0" state="M" dir="l" /><connection from="WS" to="south_north" fromLane="0" toLane="0" state="M" dir="l" /><connection from="WS" to="SN" fromLane="0" toLane="0" state="M" dir="l" /><connection from="WS" to="SE" fromLane="0" toLane="0" state="M" dir="l" /><connection from="SN" to="north_south" fromLane="0" toLane="0" state="M" dir="t" /><connection from="SN" to="NE" fromLane="0" toLane="0" state="M" dir="r" /><connection from="SN" to="NW" fromLane="0" toLane="0" state="M" dir="l" /><connection from="NE" to="east_west" fromLane="0" toLane="0" state="M" dir="r" /><connection from="NE" to="EW" fromLane="0" toLane="0" state="M" dir="r" /><connection from="EW" to="west_east" fromLane="0" toLane="0" state="M" dir="t" /><connection from="EW" to="WS" fromLane="0" toLane="0" state="M" dir="l" /><connection from="EW" to="W_A1W" fromLane="0" toLane="0" state="M" dir="l" /><connection from="EW" to="W_A2W" fromLane="0" toLane="0" state="M" dir="r" /><connection from="NW" to="west_east" fromLane="0" toLane="0" state="M" dir="l" /><connection from="NW" to="WS" fromLane="0" toLane="0" state="M" dir="l" /><connection from="NW" to="W_A1W" fromLane="0" toLane="0" state="M" dir="l" /><connection from="NW" to="W_A2W" fromLane="0" toLane="0" state="M" dir="r" /><connection from="SE" to="east_west" fromLane="0" toLane="0" state="M" dir="l" /><connection from="SE" to="EW" fromLane="0" toLane="0" state="M" dir="l" /><connection from="W_A1W" to="aisle_west_east" fromLane="0" toLane="0" state="M" dir="l" /><connection from="A1E_E" to="east_west" fromLane="0" toLane="0" state="M" dir="l" /><connection from="A1E_E" to="EW" fromLane="0" toLane="0" state="M" dir="l" /><connection from="A2E_E" to="east_west" fromLane="0" toLane="0" state="M" dir="r" /><connection from="A2E_E" to="EW" fromLane="0" toLane="0" state="M" dir="r" /></net>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+
+  <vType id="car_normal" accel="2.6" decel="4.5" length="4.5" maxSpeed="13.9" sigma="0.5" color="0,0,255"/>
+  <vType id="car_family" accel="2.6" decel="4.5" length="4.8" maxSpeed="13.9" sigma="0.5" color="0,255,0"/>
+  <vType id="car_disabled" accel="2.6" decel="4.5" length="4.5" maxSpeed="12.5" sigma="0.7" color="255,0,0"/>
+
+  <!-- simple loop route entering from W and exiting to E -->
+  <route id="r0" edges="W_A1W aisle_west_east A1E_E"/>
+
+  <!-- demand flows; actual shares controlled by controller (spawns by traci), but include fallback here -->
+  <flow id="f_normal"   type="car_normal"   route="r0" begin="0" end="3600" vehsPerHour="400"/>
+  <flow id="f_family"   type="car_family"   route="r0" begin="0" end="3600" vehsPerHour="300"/>
+  <flow id="f_disabled" type="car_disabled" route="r0" begin="0" end="3600" vehsPerHour="200"/>
+
+</routes>
