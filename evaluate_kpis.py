@@ -1,15 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
 """
 evaluate_kpis.py
-讀 output/kpis_*.csv，計算三個 headline 指標：
-  1) success_rate           : 真的停進車位的比例（CSV 有紀錄者）
+讀 output/kpis_*.csv，計算：
+  1) success_rate           : 停車成功率（CSV 中有記錄的都算成功）
   2) avg_driving_distance_m : 平均行駛距離（controller 以 m/s*1s 累計）
-  3) correct_reserved_rate  : 保留族群（family/disabled）是否停在相符保留位的比例
+  3) correct_reserved_rate  : family/disabled 是否停在對應保留位
 輸出到 output/evaluation_summary.csv，並在終端印出表格。
 """
-
 import glob
 import csv
 import os
@@ -40,7 +38,10 @@ def summarize(rows):
         pa = r["park_area"]
         t = area_type(pa)
         if u in ("family", "disabled"):
-            (ok if u == t else bad).__iadd__(1)
+            if u == t:
+                ok += 1
+            else:
+                bad += 1
     corr = ok / (ok+bad) if (ok+bad) > 0 else 0.0
     return {"n_parked": n, "success_rate": success_rate, "avg_driving_distance_m": avg_dist, "correct_reserved_rate": corr}
 
@@ -68,5 +69,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import csv
     main()

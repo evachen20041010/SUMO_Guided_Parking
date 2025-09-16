@@ -1,0 +1,18 @@
+[launch] sumo-gui -c config.sumocfg
+[traci] connected
+[step0] t=1.00 minExpected=6
+[ERROR]
+Traceback (most recent call last):
+  File "C:\Users\user\Desktop\SUMO_Guided_Parking\controller_mdp.py", line 403, in main
+    ctl.on_depart(v)
+    ~~~~~~~~~~~~~^^^
+  File "C:\Users\user\Desktop\SUMO_Guided_Parking\controller_mdp.py", line 289, in on_depart
+    self._decide_and_assign(veh_id)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "C:\Users\user\Desktop\SUMO_Guided_Parking\controller_mdp.py", line 318, in _decide_and_assign
+    cands = self._select_candidates(ut)
+  File "C:\Users\user\Desktop\SUMO_Guided_Parking\controller_mdp.py", line 266, in _select_candidates
+    cap = traci.parkingarea.getRoadSideCapacity(pa)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ParkingAreaDomain' object has no attribute 'getRoadSideCapacity'
+

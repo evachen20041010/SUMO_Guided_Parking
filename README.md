@@ -16,11 +16,11 @@ special spaces (Family / Disabled), compliance, enforcement, info delay, and dyn
    ```
 3. **Run (GUI)**:
    ```bash
-   python controller.py --gui
+   python controller_mdp.py --gui
    ```
    or **run (headless)**:
    ```bash
-   python controller.py
+   python controller_mdp.py --gui --cfg config.sumocfg
    ```
 
 The controller will launch SUMO with `config.sumocfg`, spawn traffic (normal/family/disabled),
@@ -36,7 +36,7 @@ parking_guided_template/
   ├─ network.net.xml         # Prebuilt mini network (simple aisles loop)
   ├─ routes.rou.xml          # Vehicle types and demand (flows)
   ├─ parking.add.xml         # Parking areas: General / Family / Disabled
-  ├─ controller.py           # TraCI controller (assignment, reassignment, enforcement)
+  ├─ controller_mdp.py           # TraCI controller (assignment, reassignment, enforcement)
   ├─ params.yaml             # Tunable parameters (shares, delays, compliance, etc.)
   └─ README.md               # This file
 ```

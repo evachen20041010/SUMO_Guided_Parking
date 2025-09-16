@@ -1,24 +1,22 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
 """
 controller_mdp.py
 -----------------
-把「基於馬可夫決策過程（MDP）」的停車位指派接上 SUMO 模板。
+把「MDP 停車位指派」整合到你的 SUMO 模板，含穩定主迴圈與除錯日誌。
 
-支援情境（params.yaml 的 scenario）：
-  - free             : 不指派，當 baseline
-  - assign_static    : 一次性啟發式指派（以佔用率/步行代價的簡單啟發式）
-  - assign_dynamic   : 啟發式 + 在目標區滿了時動態重指派
-  - mdp              : 論文風格的獎勵 R 最大化（差值型）
+情境（params.yaml 的 scenario）：
+  - free             : 不指派（baseline）
+  - assign_static    : 一次性啟發式
+  - assign_dynamic   : 啟發式 + 目標滿了時重指派
+  - mdp              : 依論文風格的獎勵 R 最大化（差值型）
 
-重要實作細節：
-  * 會先 simulationStep() 一次，避免 0.00s 時就退出。
-  * 指派到某個 parkingArea 時，先把車的目標 edge 改成該區所在 edge，
-    並 rerouteTraveltime()，再 setParkingAreaStop()，確保會真的停進去。
-  * KPI 會多輸出 MDP 的組成項（drive_cost / walk_cost / penalty / benefit / var_term / R）。
------------------
-python controller_mdp.py --gui --cfg config.sumocfg
+重點：
+  * 先 simulationStep() 一次，避免 0.00s 提早結束
+  * 指派時先改道至停車區所在 edge（changeTarget + rerouteTraveltime）
+    再 setParkingAreaStop，確保車會真的停進去
+  * 會把關鍵事件寫到 output/run.log，便於排錯
+  * KPI 會另外輸出 MDP 組成項（drive_cost / walk_cost / penalty / benefit / var_term / R）
 """
 
 import os
@@ -28,25 +26,29 @@ import random
 import yaml
 import math
 import csv
+import traceback
 from collections import defaultdict
 import traci  # pip install eclipse-sumo
 
 CFG_FILE = "config.sumocfg"
+LOG_PATH = "output/run.log"
 
-# === 依目前檔案的車位 ID 分群 ===
+# === 依你的車位 ID 命名分群（若改名請同步改這邊） ===
 SPECIAL_FAMILY = ["PA_F_W"]
 SPECIAL_DISABLED = ["PA_D_E"]
 GENERAL = ["PA_G_W1", "PA_G_E1"]
 ALL_PAS = GENERAL + SPECIAL_FAMILY + SPECIAL_DISABLED
 
-
 # ---------- 小工具 ----------
+
+
 def pa_type(pa_id: str) -> str:
     if pa_id in SPECIAL_FAMILY:
         return "family"
     if pa_id in SPECIAL_DISABLED:
         return "disabled"
     return "general"
+
 
 def user_type_from_vtype(vtype: str) -> str:
     vt = vtype.lower()
@@ -58,27 +60,33 @@ def user_type_from_vtype(vtype: str) -> str:
         return "vip"
     return "normal"
 
+
 def legal_candidates(user_type: str):
-    # 若要「不允許違規」可只回傳合法集合；在 _select_candidates() 也可全放行再用 penalty 懲罰
     if user_type == "family":
         return SPECIAL_FAMILY + GENERAL
     if user_type == "disabled":
         return SPECIAL_DISABLED + GENERAL
     if user_type == "vip":
-        return GENERAL  # 若之後有 VIP 專區，再行擴充
+        return GENERAL  # 之後有 VIP 專區再擴充
     return GENERAL
 
-
 # ---------- 參數 ----------
+
+
 def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--gui", action="store_true", help="run with sumo-gui")
     ap.add_argument("--cfg", default=CFG_FILE)
     return ap.parse_args()
 
+
 def load_params():
-    with open("params.yaml", "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    try:
+        with open("params.yaml", "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
 
 def sumo_cmd(gui: bool, cfg: str, params):
     exe = "sumo-gui" if gui else "sumo"
@@ -87,6 +95,18 @@ def sumo_cmd(gui: bool, cfg: str, params):
         os.makedirs("output", exist_ok=True)
         cmd += ["--emission-output", "output/emissions.xml"]
     return cmd
+
+# ---------- 紀錄 ----------
+
+
+def logger():
+    os.makedirs("output", exist_ok=True)
+    f = open(LOG_PATH, "w", encoding="utf-8")
+
+    def log(msg):
+        print(msg)
+        print(msg, file=f, flush=True)
+    return log, f
 
 
 # ---------- KPI ----------
@@ -97,6 +117,7 @@ KPI_HEADER = [
     "drive_cost", "walk_cost", "penalty_cost", "benefit", "var_term", "R_selected"
 ]
 
+
 def open_kpi_writer(scenario: str):
     os.makedirs("output", exist_ok=True)
     path = f"output/kpis_{scenario}.csv"
@@ -105,11 +126,13 @@ def open_kpi_writer(scenario: str):
     w.writerow(KPI_HEADER)
     return f, w, path
 
-
 # ---------- 幾何 & 路徑 ----------
+
+
 def get_edge_of_pa(pa_id: str) -> str:
     lane_id = traci.parkingarea.getLaneID(pa_id)
     return traci.lane.getEdgeID(lane_id)
+
 
 def route_length_time(from_edge: str, to_edge: str):
     """回傳 (長度 m, 行駛時間 s)；失敗時回 inf。"""
@@ -119,18 +142,21 @@ def route_length_time(from_edge: str, to_edge: str):
     except traci.TraCIException:
         return float("inf"), float("inf")
 
-
 # ---------- MDP 成本/獎勵 ----------
+
+
 def driving_cost(v_id: str, pa_id: str) -> float:
     edge_now = traci.vehicle.getRoadID(v_id)
     edge_pa = get_edge_of_pa(pa_id)
     L, T = route_length_time(edge_now, edge_pa)
     return T if math.isfinite(T) else (L / 10.0)  # 沒時間就用距離/10 m/s 近似
 
+
 def walking_cost(pa_id: str, mdp_cfg: dict) -> float:
-    # 可在 params.yaml: mdp.walking_proxy 指定每區步行代價；否則：保留區 30、一般 40
+    # 可在 params.yaml: mdp.walking_proxy 指定每區步行代價；否則：保留 30 / 一般 40
     wd = mdp_cfg.get("walking_proxy", {}).get(pa_id)
     return float(wd) if wd is not None else (30.0 if pa_type(pa_id) in ("family", "disabled") else 40.0)
+
 
 def violation_penalty(user_type: str, pa_t: str, mdp_cfg: dict) -> float:
     # 違規懲罰矩陣（可在 params.yaml 覆蓋）
@@ -144,6 +170,7 @@ def violation_penalty(user_type: str, pa_t: str, mdp_cfg: dict) -> float:
     gamma = float(mdp_cfg.get("gamma_violation", 10.0))
     return gamma * base
 
+
 def benefit(pa_id: str, user_type: str, mdp_cfg: dict) -> float:
     baseFee = float(mdp_cfg.get("base_fee", 0.0))
     zone_heat = mdp_cfg.get("zone_heat", {})
@@ -151,16 +178,18 @@ def benefit(pa_id: str, user_type: str, mdp_cfg: dict) -> float:
         "user_bonus", {"vip": 20, "disabled": 10, "family": 10, "normal": 0})
     return baseFee + float(zone_heat.get(pa_id, 0)) + float(user_bonus.get(user_type, 0))
 
+
 def reserved_cost(pa_t: str, user_type: str, mdp_cfg: dict) -> float:
-    # 保留位的管理/違規成本：合規 0；違規大罰 M；（可選）一般位停保留車收 m
+    """保留位的管理/違規成本：合規 0；違規 M；（可選）一般位停保留車收 m。"""
     m = float(mdp_cfg.get("m_reserved_mgmt", 5.0))
     M = float(mdp_cfg.get("M_violate", 50.0))
-    if pa_t in ("family", "disabled"):
+    if pa_t in ("family", "disabled"):   # 停保留位
         return 0.0 if user_type == pa_t else M
     return m if user_type in ("family", "disabled", "vip") else 0.0
 
+
 def variance_term(mdp_cfg: dict) -> float:
-    # 用『各類（general/family/disabled）剩餘量』的方差做均衡懲罰
+    """用『各類（general/family/disabled）剩餘量』的方差做均衡懲罰。"""
     rem = defaultdict(int)
     for pa in ALL_PAS:
         cap = traci.parkingarea.getRoadSideCapacity(pa)
@@ -174,6 +203,7 @@ def variance_term(mdp_cfg: dict) -> float:
     lam = float(mdp_cfg.get("lambda_var", 1.0))
     return lam * var
 
+
 def mdp_reward(v_id: str, pa_id: str, user_type: str, mdp_cfg: dict):
     alpha = float(mdp_cfg.get("alpha_drive", 0.3))
     beta = float(mdp_cfg.get("beta_walk", 0.6))
@@ -186,11 +216,13 @@ def mdp_reward(v_id: str, pa_id: str, user_type: str, mdp_cfg: dict):
     R = b - (alpha*d + beta*w) - reserved_cost(pa_t, user_type, mdp_cfg) - var
     return R, (d, w, p, b, var)
 
-
 # ---------- 控制器 ----------
+
+
 class Controller:
-    def __init__(self, params):
+    def __init__(self, params, log):
         self.p = params
+        self.log = log
         self.scenario = params.get("scenario", "mdp")
         random.seed(params.get("random_seed", 42))
         self.users = {}  # vehID -> 狀態
@@ -221,10 +253,10 @@ class Controller:
                 veh_id, pa_id, duration=self.p.get("park_duration_s", 600)
             )
         except traci.TraCIException as e:
-            print(f"[assign-failed] {veh_id} -> {pa_id}: {e}", file=sys.stderr)
+            self.log(f"[assign-failed] {veh_id} -> {pa_id}: {e}")
 
     def _select_candidates(self, user_type: str):
-        # allow_violation=True 時，候選=所有區；否則只取合法集合
+        # allow_violation=True：候選=所有區；否則只取合法集合
         allow_violation = bool(self.p.get("allow_violation", True))
         cands = list(ALL_PAS) if allow_violation else list(
             legal_candidates(user_type))
@@ -262,6 +294,7 @@ class Controller:
             mdp_cfg = self.p.get("mdp", {})
             cands = self._select_candidates(ut)
             if not cands:
+                self.log(f"[mdp] no candidates for {veh_id} ({ut})")
                 return
             best_pa, best_R, best_terms = None, -1e18, None
             for pa in cands:
@@ -272,7 +305,8 @@ class Controller:
             self.users[veh_id]["R"] = best_R
             self.users[veh_id]["mdp_terms"] = best_terms
             self._reroute_to_pa(veh_id, best_pa)
-            print(f"[mdp] assign {veh_id} ({ut}) -> {best_pa}  R={best_R:.2f}")
+            self.log(
+                f"[mdp] assign {veh_id} ({ut}) -> {best_pa}  R={best_R:.2f}")
         else:
             # 簡單啟發式（佔用率 + 步行代價）
             def h(pa):
@@ -287,6 +321,7 @@ class Controller:
             best = min(cands, key=h)
             self.users[veh_id]["assigned"] = best
             self._reroute_to_pa(veh_id, best)
+            self.log(f"[heuristic] assign {veh_id} ({ut}) -> {best}")
 
     # --- 事件：實際停進去 ---
     def on_park(self, veh_id: str, area_id: str):
@@ -334,20 +369,30 @@ class Controller:
                         self._decide_and_assign(v)
                         u["reassigns"] += 1
 
-
 # ---------- 主迴圈 ----------
-def main():
-    args = parse_args()
-    params = load_params()
-    cmd = sumo_cmd(args.gui, args.cfg, params)
-    traci.start(cmd)
 
-    ctl = Controller(params)
-    seen = set()
-    parked_prev = set()
+
+def main():
+    os.makedirs("output", exist_ok=True)
+    log, log_file = logger()
+
     try:
+        args = parse_args()
+        params = load_params()
+        cmd = sumo_cmd(args.gui, args.cfg, params)
+        log(f"[launch] {' '.join(cmd)}")
+
+        traci.start(cmd)
+        log("[traci] connected")
+
+        ctl = Controller(params, log)
+        seen = set()
+        parked_prev = set()
+
         # 先 step 一次，避免 0.00 s 退出
         traci.simulationStep()
+        log(f"[step0] t={traci.simulation.getTime():.2f} minExpected={traci.simulation.getMinExpectedNumber()}")
+
         while True:
             t = int(traci.simulation.getTime())
 
@@ -375,13 +420,33 @@ def main():
             # 週期性重指派/距離累積
             ctl.tick(t)
 
+            # 每秒寫一行小摘要到 log（避免太多 IO）
+            if traci.simulation.getTime().is_integer():
+                me = traci.simulation.getMinExpectedNumber()
+                log(f"[t={t:4d}] minExpected={me} running={len(traci.vehicle.getIDList())}")
+
             # 結束條件：網路無車且已經跑過至少 1 秒
             if traci.simulation.getMinExpectedNumber() == 0 and traci.simulation.getTime() >= 1.0:
+                log("[exit] minExpected==0")
                 break
+
             traci.simulationStep()
+
+    except Exception:
+        log("[ERROR]\n" + traceback.format_exc())
     finally:
-        ctl.close()
-        traci.close()
+        try:
+            ctl.close()
+        except:
+            pass
+        try:
+            traci.close(False)
+        except:
+            pass
+        try:
+            log_file.close()
+        except:
+            pass
 
 
 if __name__ == "__main__":

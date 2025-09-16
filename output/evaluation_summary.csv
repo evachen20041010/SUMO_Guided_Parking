@@ -1,0 +1,5 @@
+scenario,n_parked,success_rate,avg_driving_distance_m,correct_reserved_rate
+assign_dynamic,0,0.0,0.0,0.0
+assign_static,0,0.0,0.0,0.0
+free,0,0.0,0.0,0.0
+mdp,0,0.0,0.0,0.0

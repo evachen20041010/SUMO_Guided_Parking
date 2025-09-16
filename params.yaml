@@ -1,16 +1,16 @@
 # --- 新加/需確認的鍵 ---
-scenario: mdp           # free | assign_static | assign_dynamic | mdp
+scenario: assign_dynamic # free | assign_static | assign_dynamic | mdp
 random_seed: 42
-p_compliance: 1.0       # 先設 1.0 觀察純決策效果，再引入不遵從
+p_compliance: 1.0 # 先設 1.0 看純決策效果，再引入不遵從
 max_reassignments: 2
 mdp_replan_period_s: 10
 park_duration_s: 600
-allow_violation: true   # True: 候選可含保留位，靠 penalty 去懲罰
+allow_violation: true # True: 候選可含保留位，靠 penalty 懲罰
 
 enable_emissions: false
 
 mdp:
-  # 論文示例的權重
+  # 論文示例權重（可調）
   alpha_drive: 0.3
   beta_walk: 0.6
   gamma_violation: 10.0
@@ -19,7 +19,7 @@ mdp:
   lambda_var: 1.0
   base_fee: 0
 
-  # 每區的步行代價（沒有就用: 保留30 / 一般40）
+  # 每區步行代價（沒有就用：保留30 / 一般40）
   walking_proxy:
     PA_G_W1: 40
     PA_G_E1: 40
@@ -42,10 +42,10 @@ mdp:
 
   # 違規懲罰矩陣（乘以 gamma_violation）
   penalty_matrix:
-    normal:   {general: 0, family: 3, disabled: 3}
-    family:   {general: 1, family: 0, disabled: 2}
-    disabled: {general: 2, family: 2, disabled: 0}
-    vip:      {general: 1, family: 3, disabled: 3}
+    normal: { general: 0, family: 3, disabled: 3 }
+    family: { general: 1, family: 0, disabled: 2 }
+    disabled: { general: 2, family: 2, disabled: 0 }
+    vip: { general: 1, family: 3, disabled: 3 }
 
 
 
