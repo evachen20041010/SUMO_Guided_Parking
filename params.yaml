@@ -1,5 +1,5 @@
 # --- 新加/需確認的鍵 ---
-scenario: assign_dynamic # free | assign_static | assign_dynamic | mdp
+scenario: mdp # free | assign_static | assign_dynamic | mdp
 random_seed: 42
 p_compliance: 1.0 # 先設 1.0 看純決策效果，再引入不遵從
 max_reassignments: 2

@@ -1,24 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-controller_mdp.py
------------------
-把「MDP 停車位指派」整合到你的 SUMO 模板，含穩定主迴圈與除錯日誌。
-
-情境（params.yaml 的 scenario）：
-  - free             : 不指派（baseline）
-  - assign_static    : 一次性啟發式
-  - assign_dynamic   : 啟發式 + 目標滿了時重指派
-  - mdp              : 依論文風格的獎勵 R 最大化（差值型）
-
-重點：
-  * 先 simulationStep() 一次，避免 0.00s 提早結束
-  * 指派時先改道至停車區所在 edge（changeTarget + rerouteTraveltime）
-    再 setParkingAreaStop，確保車會真的停進去
-  * 會把關鍵事件寫到 output/run.log，便於排錯
-  * KPI 會另外輸出 MDP 組成項（drive_cost / walk_cost / penalty / benefit / var_term / R）
+controller_mdp.py  (legacy TraCI-friendly)
+- 不使用 traci.parkingarea.getCapacity()
+- 會從 config.sumocfg 解析 additional-files，讀 parking.add.xml 取得各 PA 容量
+- 佔用數用 getVehicleCount()；若舊版無此函式則改用 len(getVehicleIDs())
+- 其它邏輯同前：MDP/啟發式/動態重指派、KPI、run.log
 """
-
 import os
 import sys
 import argparse
@@ -28,6 +16,7 @@ import math
 import csv
 import traceback
 from collections import defaultdict
+import xml.etree.ElementTree as ET
 import traci  # pip install eclipse-sumo
 
 CFG_FILE = "config.sumocfg"
@@ -38,6 +27,9 @@ SPECIAL_FAMILY = ["PA_F_W"]
 SPECIAL_DISABLED = ["PA_D_E"]
 GENERAL = ["PA_G_W1", "PA_G_E1"]
 ALL_PAS = GENERAL + SPECIAL_FAMILY + SPECIAL_DISABLED
+
+# ---- 全域：由 add.xml 解析出的容量快取 ----
+CAP_CACHE = {}  # pa_id -> int(capacity)
 
 # ---------- 小工具 ----------
 
@@ -67,8 +59,31 @@ def legal_candidates(user_type: str):
     if user_type == "disabled":
         return SPECIAL_DISABLED + GENERAL
     if user_type == "vip":
-        return GENERAL  # 之後有 VIP 專區再擴充
+        return GENERAL
     return GENERAL
+
+# --- 佔用/容量（相容舊版 TraCI） ---
+
+
+def pa_occupancy(pa_id: str) -> int:
+    """優先用 getVehicleCount；沒有就用 getVehicleIDs"""
+    try:
+        return int(traci.parkingarea.getVehicleCount(pa_id))
+    except Exception:
+        try:
+            return len(traci.parkingarea.getVehicleIDs(pa_id))
+        except Exception:
+            return 0
+
+
+def pa_capacity(pa_id: str, log=None) -> int:
+    """優先用 CAP_CACHE；若沒有，就回推 999（避免誤判滿位）。"""
+    cap = CAP_CACHE.get(pa_id)
+    if cap is not None:
+        return cap
+    if log:
+        log(f"[warn] capacity not found in CAP_CACHE for {pa_id}. Assume 999.")
+    return 999
 
 # ---------- 參數 ----------
 
@@ -96,6 +111,56 @@ def sumo_cmd(gui: bool, cfg: str, params):
         cmd += ["--emission-output", "output/emissions.xml"]
     return cmd
 
+# ---------- 讀 sumocfg / parking.add.xml 取得容量 ----------
+
+
+def find_additional_files_from_sumocfg(cfg_path: str):
+    """回傳 additional-files 的清單（展開逗號/分號）"""
+    try:
+        tree = ET.parse(cfg_path)
+        root = tree.getroot()
+        node = root.find(".//configuration/input/additional-files")
+        if node is None:
+            return []
+        val = node.get("value", "")
+        parts = [p.strip() for p in val.replace(
+            ";", ",").split(",") if p.strip()]
+        return parts
+    except Exception:
+        return []
+
+
+def load_pa_capacities_from_additional(paths, log=None):
+    """從 parking.add.xml 讀取 <parkingArea> 的 capacity
+       支援屬性：roadsideCapacity / capacity；或計算 <space> 子節點數量"""
+    caps = {}
+    for p in paths:
+        if not os.path.exists(p):
+            # 有些 sumocfg 路徑是相對 config 的；試著用 cfg 所在目錄拼
+            continue
+        try:
+            tree = ET.parse(p)
+            root = tree.getroot()
+            for pa in root.findall(".//parkingArea"):
+                pid = pa.get("id")
+                cap = pa.get("roadsideCapacity")
+                if cap is None:
+                    cap = pa.get("capacity")
+                if cap is None:
+                    # 有些寫成逐格 <space/>：數一下
+                    cap = len(pa.findall(".//space"))
+                if pid and cap:
+                    try:
+                        caps[pid] = int(float(cap))
+                    except:
+                        pass
+        except Exception as e:
+            if log:
+                log(f"[warn] parse {p} failed: {e}")
+    if log:
+        log(f"[cap] loaded: {caps}")
+    return caps
+
 # ---------- 紀錄 ----------
 
 
@@ -113,7 +178,6 @@ def logger():
 KPI_HEADER = [
     "vehID", "userType", "scenario", "t_enter", "t_park", "search_time",
     "driving_dist", "reassigns", "park_area", "compliant", "violation_flag",
-    # MDP 分解（只有 scenario=mdp 會填）
     "drive_cost", "walk_cost", "penalty_cost", "benefit", "var_term", "R_selected"
 ]
 
@@ -135,7 +199,6 @@ def get_edge_of_pa(pa_id: str) -> str:
 
 
 def route_length_time(from_edge: str, to_edge: str):
-    """回傳 (長度 m, 行駛時間 s)；失敗時回 inf。"""
     try:
         r = traci.simulation.findRoute(from_edge, to_edge, vType="car_normal")
         return r.length, r.travelTime
@@ -149,17 +212,15 @@ def driving_cost(v_id: str, pa_id: str) -> float:
     edge_now = traci.vehicle.getRoadID(v_id)
     edge_pa = get_edge_of_pa(pa_id)
     L, T = route_length_time(edge_now, edge_pa)
-    return T if math.isfinite(T) else (L / 10.0)  # 沒時間就用距離/10 m/s 近似
+    return T if math.isfinite(T) else (L / 10.0)
 
 
 def walking_cost(pa_id: str, mdp_cfg: dict) -> float:
-    # 可在 params.yaml: mdp.walking_proxy 指定每區步行代價；否則：保留 30 / 一般 40
     wd = mdp_cfg.get("walking_proxy", {}).get(pa_id)
     return float(wd) if wd is not None else (30.0 if pa_type(pa_id) in ("family", "disabled") else 40.0)
 
 
 def violation_penalty(user_type: str, pa_t: str, mdp_cfg: dict) -> float:
-    # 違規懲罰矩陣（可在 params.yaml 覆蓋）
     M = mdp_cfg.get("penalty_matrix", {
         "normal":   {"general": 0, "family": 3, "disabled": 3},
         "family":   {"general": 1, "family": 0, "disabled": 2},
@@ -180,20 +241,19 @@ def benefit(pa_id: str, user_type: str, mdp_cfg: dict) -> float:
 
 
 def reserved_cost(pa_t: str, user_type: str, mdp_cfg: dict) -> float:
-    """保留位的管理/違規成本：合規 0；違規 M；（可選）一般位停保留車收 m。"""
     m = float(mdp_cfg.get("m_reserved_mgmt", 5.0))
     M = float(mdp_cfg.get("M_violate", 50.0))
-    if pa_t in ("family", "disabled"):   # 停保留位
+    if pa_t in ("family", "disabled"):
         return 0.0 if user_type == pa_t else M
     return m if user_type in ("family", "disabled", "vip") else 0.0
 
 
 def variance_term(mdp_cfg: dict) -> float:
-    """用『各類（general/family/disabled）剩餘量』的方差做均衡懲罰。"""
+    """以各類剩餘量的方差做均衡懲罰（用 CAP_CACHE 與 pa_occupancy）"""
     rem = defaultdict(int)
     for pa in ALL_PAS:
-        cap = traci.parkingarea.getRoadSideCapacity(pa)
-        occ = traci.parkingarea.getVehicleCount(pa)
+        cap = pa_capacity(pa)
+        occ = pa_occupancy(pa)
         rem[pa_type(pa)] += max(0, cap - occ)
     vals = list(rem.values())
     if not vals:
@@ -256,15 +316,13 @@ class Controller:
             self.log(f"[assign-failed] {veh_id} -> {pa_id}: {e}")
 
     def _select_candidates(self, user_type: str):
-        # allow_violation=True：候選=所有區；否則只取合法集合
         allow_violation = bool(self.p.get("allow_violation", True))
         cands = list(ALL_PAS) if allow_violation else list(
             legal_candidates(user_type))
-        # 過濾滿位
+        # 過濾滿位（用 CAP_CACHE 容量 + 佔用）
         free = []
         for pa in cands:
-            cap = traci.parkingarea.getRoadSideCapacity(pa)
-            occ = traci.parkingarea.getVehicleCount(pa)
+            cap, occ = pa_capacity(pa), pa_occupancy(pa)
             if occ < cap:
                 free.append(pa)
         return free
@@ -281,11 +339,9 @@ class Controller:
         }
         if self.scenario == "free":
             return
-        # 不遵從（p_compliance < 1.0）
         if random.random() > self.p.get("p_compliance", 1.0):
             self.users[veh_id]["compliant"] = False
             return
-        # 初始決策
         self._decide_and_assign(veh_id)
 
     def _decide_and_assign(self, veh_id: str):
@@ -310,8 +366,8 @@ class Controller:
         else:
             # 簡單啟發式（佔用率 + 步行代價）
             def h(pa):
-                occ = traci.parkingarea.getVehicleCount(pa)
-                cap = traci.parkingarea.getRoadSideCapacity(pa)
+                occ = pa_occupancy(pa)
+                cap = pa_capacity(pa)
                 occ_ratio = (occ+1) / max(1, cap)
                 walk = 30.0 if pa_type(pa) in ("family", "disabled") else 40.0
                 return 0.5*occ_ratio + 0.5*(walk/50.0)
@@ -352,7 +408,7 @@ class Controller:
             except KeyError:
                 pass
 
-        # 動態重指派：目標滿了就重算（含 MDP）
+        # 動態重指派：目標滿了就重算
         if self.scenario in ("assign_dynamic", "mdp"):
             if t_now - self.last_replan_at >= self.replan_dt:
                 self.last_replan_at = t_now
@@ -363,8 +419,8 @@ class Controller:
                     tgt = u.get("assigned")
                     if tgt is None:
                         continue
-                    cap = traci.parkingarea.getRoadSideCapacity(tgt)
-                    occ = traci.parkingarea.getVehicleCount(tgt)
+                    cap = pa_capacity(tgt)
+                    occ = pa_occupancy(tgt)
                     if occ >= cap:  # 目標滿了 → 重新決策
                         self._decide_and_assign(v)
                         u["reassigns"] += 1
@@ -379,6 +435,15 @@ def main():
     try:
         args = parse_args()
         params = load_params()
+
+        # 先從 sumocfg 找 additional-files，載入 capacity
+        add_paths = find_additional_files_from_sumocfg(args.cfg)
+        # 若 sumocfg 沒寫，嘗試用預設檔名
+        if not add_paths and os.path.exists("parking.add.xml"):
+            add_paths = ["parking.add.xml"]
+        global CAP_CACHE
+        CAP_CACHE = load_pa_capacities_from_additional(add_paths, log)
+
         cmd = sumo_cmd(args.gui, args.cfg, params)
         log(f"[launch] {' '.join(cmd)}")
 
@@ -389,25 +454,21 @@ def main():
         seen = set()
         parked_prev = set()
 
-        # 先 step 一次，避免 0.00 s 退出
         traci.simulationStep()
         log(f"[step0] t={traci.simulation.getTime():.2f} minExpected={traci.simulation.getMinExpectedNumber()}")
 
         while True:
             t = int(traci.simulation.getTime())
 
-            # 新出發車
             for v in traci.simulation.getDepartedIDList():
                 if v not in seen:
                     seen.add(v)
                     ctl.on_depart(v)
-            # 保險：補漏掉的車
             for v in traci.vehicle.getIDList():
                 if v not in seen:
                     seen.add(v)
                     ctl.on_depart(v)
 
-            # 掃停車事件（只記錄「新停進」的那一刻）
             parked_now = set()
             for pa in ALL_PAS:
                 for v in traci.parkingarea.getVehicleIDs(pa):
@@ -417,15 +478,12 @@ def main():
                 ctl.on_park(v, pa)
             parked_prev = parked_now
 
-            # 週期性重指派/距離累積
             ctl.tick(t)
 
-            # 每秒寫一行小摘要到 log（避免太多 IO）
             if traci.simulation.getTime().is_integer():
                 me = traci.simulation.getMinExpectedNumber()
                 log(f"[t={t:4d}] minExpected={me} running={len(traci.vehicle.getIDList())}")
 
-            # 結束條件：網路無車且已經跑過至少 1 秒
             if traci.simulation.getMinExpectedNumber() == 0 and traci.simulation.getTime() >= 1.0:
                 log("[exit] minExpected==0")
                 break
